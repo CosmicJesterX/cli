@@ -782,6 +782,74 @@ func TestClientReadBranchConfig(t *testing.T) {
 	}
 }
 
+func TestClientReadAtPushRef(t *testing.T) {
+	tests := []struct {
+		name         string
+		branchName   string
+		revParseMock commandResult
+		wantRef      string
+		wantError    error
+	}{
+		{
+			name:       "when `git rev-parse --abbrev-ref branchName@{push}` resolves, it returns the correct RemoteRef",
+			branchName: "branchName",
+			revParseMock: commandResult{
+				Stdout: "remoteName/branchName",
+			},
+			wantRef: "remoteName/branchName",
+		},
+		{
+			name:       "when `git rev-parse --abbrev-ref otherBranch@{push}` resolves, it returns the correct RemoteRef",
+			branchName: "otherBranch",
+			revParseMock: commandResult{
+				Stdout: "otherRemote/otherBranch",
+			},
+			wantRef: "otherRemote/otherBranch",
+		},
+		{
+			name:       "when `git rev-parse --abbrev-ref branchName@{push}` does not resolve because push.default = simple, it should return the correct RemoteRef and Error",
+			branchName: "branchName",
+			revParseMock: commandResult{
+				ExitStatus: 128,
+				Stderr:     "fatal: cannot resolve 'simple' push to a single destination",
+			},
+			wantRef:   "",
+			wantError: errors.New("failed to run git: fatal: cannot resolve 'simple' push to a single destination. If you are trying to use a non-centralized workflow, set push.default to current: `git config push.default current`"),
+		},
+		{
+			name:       "when `git rev-parse --abbrev-ref branchName@{push}` does not resolve because of a git error, it should return the correct RemoteRef and Error",
+			branchName: "branchName",
+			revParseMock: commandResult{
+				ExitStatus: 2,
+				Stderr:     "git-error",
+			},
+			wantRef:   "",
+			wantError: errors.New("failed to run git: git-error"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pathToGit := "path/to/git"
+			revParseCommand := fmt.Sprintf("%s rev-parse --abbrev-ref %s@{push}", pathToGit, tt.branchName)
+			cmdCtx := createMockedCommandContext(t, mockedCommands{
+				args(revParseCommand): tt.revParseMock,
+			})
+			client := Client{
+				GitPath:        pathToGit,
+				commandContext: cmdCtx,
+			}
+			ref, err := client.ReadAtPushRef(context.Background(), tt.branchName)
+			if tt.wantError != nil {
+				require.Error(t, err)
+				assert.EqualError(t, err, tt.wantError.Error())
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantRef, ref)
+		})
+	}
+}
+
 func Test_parseBranchConfig(t *testing.T) {
 	tests := []struct {
 		name             string

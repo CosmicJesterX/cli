@@ -376,6 +376,32 @@ func (c *Client) lookupCommit(ctx context.Context, sha, format string) ([]byte, 
 	return out, nil
 }
 
+// ReadAtPushRef gets the push ref for the current branch. This will fail
+// in non-centralized workflows if push.default = simple. In this case
+// we return a helpful error.
+//
+// As far as I can tell, the branch name of the push-ref will always be
+// the same as the current branch name, so rev-parse is about accessing
+// correct remote.
+func (c *Client) ReadAtPushRef(ctx context.Context, branch string) (string, error) {
+	revParseOut, err := c.revParse(ctx, "--abbrev-ref", branch+"@{push}")
+	if err != nil {
+		var gitError *GitError
+		if errors.As(err, &gitError) && gitError.ExitCode == 128 {
+			// TODO:: If the branch is configured to merge to a PR, we'll fall into this error conditional
+			// with the following error message: fatal: upstream branch 'refs/pull/<prNumber>/head'
+			// not stored as a remote-tracking branch. We can use this to determine the PR number for
+			// gh pr operations, as we can get the PR number from the ref. However, this feels out of scope
+			// for this function as it currently stands. I'm going to punt on this for now, but will revisit
+			// once more of the functionality around ReadAtPushRef takes shape.
+			return "", fmt.Errorf("%s. If you are trying to use a non-centralized workflow, set push.default to current: `git config push.default current`", gitError.Error())
+		}
+		return "", err
+	}
+
+	return string(revParseOut), nil
+}
+
 // ReadBranchConfig parses the `branch.BRANCH.(remote|merge|gh-merge-base)` part of git config.
 // If no branch config is found or there is an error in the command, it returns an empty BranchConfig.
 // Downstream consumers of ReadBranchConfig should consider the behavior they desire if this errors,
