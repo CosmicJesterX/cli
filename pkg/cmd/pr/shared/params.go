@@ -3,6 +3,7 @@ package shared
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/cli/cli/v2/api"
@@ -55,56 +56,31 @@ func ValidURL(urlStr string) bool {
 	return len(urlStr) < 8192
 }
 
-// Ensure that tb.MetadataResult object exists and contains enough pre-fetched API data to be able
-// to resolve all object listed in tb to GraphQL IDs.
-func fillMetadata(client *api.Client, baseRepo ghrepo.Interface, tb *IssueMetadataState, projectV1Support gh.ProjectsV1Support) error {
-	resolveInput := api.RepoResolveInput{}
-
-	if len(tb.Assignees) > 0 && (tb.MetadataResult == nil || len(tb.MetadataResult.AssignableUsers) == 0) {
-		resolveInput.Assignees = tb.Assignees
-	}
-
-	if len(tb.Reviewers) > 0 && (tb.MetadataResult == nil || len(tb.MetadataResult.AssignableUsers) == 0) {
-		resolveInput.Reviewers = tb.Reviewers
-	}
-
-	if len(tb.Labels) > 0 && (tb.MetadataResult == nil || len(tb.MetadataResult.Labels) == 0) {
-		resolveInput.Labels = tb.Labels
-	}
-
-	if len(tb.ProjectTitles) > 0 && (tb.MetadataResult == nil || len(tb.MetadataResult.Projects) == 0) {
-		if projectV1Support == gh.ProjectsV1Supported {
-			resolveInput.ProjectsV1 = true
-		}
-
-		resolveInput.ProjectsV2 = true
-	}
-
-	if len(tb.Milestones) > 0 && (tb.MetadataResult == nil || len(tb.MetadataResult.Milestones) == 0) {
-		resolveInput.Milestones = tb.Milestones
-	}
-
-	metadataResult, err := api.RepoResolveMetadataIDs(client, baseRepo, resolveInput)
-	if err != nil {
-		return err
-	}
-
-	if tb.MetadataResult == nil {
-		tb.MetadataResult = metadataResult
-	} else {
-		tb.MetadataResult.Merge(metadataResult)
-	}
-
-	return nil
-}
-
 func AddMetadataToIssueParams(client *api.Client, baseRepo ghrepo.Interface, params map[string]interface{}, tb *IssueMetadataState, projectV1Support gh.ProjectsV1Support) error {
 	if !tb.HasMetadata() {
 		return nil
 	}
 
-	if err := fillMetadata(client, baseRepo, tb, projectV1Support); err != nil {
-		return err
+	// Retrieve minimal information needed to resolve metadata if this was not previously cached from additional metadata survey.
+	if tb.MetadataResult == nil {
+		input := api.RepoMetadataInput{
+			Reviewers: len(tb.Reviewers) > 0,
+			TeamReviewers: len(tb.Reviewers) > 0 && slices.ContainsFunc(tb.Reviewers, func(r string) bool {
+				return strings.ContainsRune(r, '/')
+			}),
+			Assignees:      len(tb.Assignees) > 0,
+			ActorAssignees: tb.ActorAssignees,
+			Labels:         len(tb.Labels) > 0,
+			ProjectsV1:     len(tb.ProjectTitles) > 0 && projectV1Support == gh.ProjectsV1Supported,
+			ProjectsV2:     len(tb.ProjectTitles) > 0,
+			Milestones:     len(tb.Milestones) > 0,
+		}
+
+		metadataResult, err := api.RepoMetadata(client, baseRepo, input)
+		if err != nil {
+			return err
+		}
+		tb.MetadataResult = metadataResult
 	}
 
 	assigneeIDs, err := tb.MetadataResult.MembersToIDs(tb.Assignees)
@@ -210,20 +186,20 @@ func (opts *FilterOptions) IsDefault() bool {
 	return true
 }
 
-func ListURLWithQuery(listURL string, options FilterOptions) (string, error) {
+func ListURLWithQuery(listURL string, options FilterOptions, advancedIssueSearchSyntax bool) (string, error) {
 	u, err := url.Parse(listURL)
 	if err != nil {
 		return "", err
 	}
 
 	params := u.Query()
-	params.Set("q", SearchQueryBuild(options))
+	params.Set("q", SearchQueryBuild(options, advancedIssueSearchSyntax))
 	u.RawQuery = params.Encode()
 
 	return u.String(), nil
 }
 
-func SearchQueryBuild(options FilterOptions) string {
+func SearchQueryBuild(options FilterOptions, advancedIssueSearchSyntax bool) string {
 	var is, state string
 	switch options.State {
 	case "open", "closed":
@@ -231,7 +207,7 @@ func SearchQueryBuild(options FilterOptions) string {
 	case "merged":
 		is = "merged"
 	}
-	q := search.Query{
+	query := search.Query{
 		Qualifiers: search.Qualifiers{
 			Assignee:  options.Assignee,
 			Author:    options.Author,
@@ -247,10 +223,18 @@ func SearchQueryBuild(options FilterOptions) string {
 			Type:      options.Entity,
 		},
 	}
-	if options.Search != "" {
-		return fmt.Sprintf("%s %s", options.Search, q.String())
+
+	var q string
+	if advancedIssueSearchSyntax {
+		q = query.AdvancedIssueSearchString()
+	} else {
+		q = query.StandardSearchString()
 	}
-	return q.String()
+
+	if options.Search != "" {
+		return fmt.Sprintf("%s %s", options.Search, q)
+	}
+	return q
 }
 
 func QueryHasStateClause(searchQuery string) bool {
@@ -311,4 +295,35 @@ func (r *MeReplacer) ReplaceSlice(handles []string) ([]string, error) {
 		}
 	}
 	return res, nil
+}
+
+// CopilotReplacer resolves usages of `@copilot` to either Copilot's login or name.
+// Login is generally needed for API calls; name is used when launching web browser.
+type CopilotReplacer struct {
+	returnLogin bool
+}
+
+func NewCopilotReplacer(returnLogin bool) *CopilotReplacer {
+	return &CopilotReplacer{
+		returnLogin: returnLogin,
+	}
+}
+
+func (r *CopilotReplacer) replace(handle string) string {
+	if !strings.EqualFold(handle, "@copilot") {
+		return handle
+	}
+	if r.returnLogin {
+		return api.CopilotActorLogin
+	}
+	return api.CopilotActorName
+}
+
+// ReplaceSlice replaces usages of `@copilot` in a slice with Copilot's login.
+func (r *CopilotReplacer) ReplaceSlice(handles []string) []string {
+	res := make([]string, len(handles))
+	for i, h := range handles {
+		res[i] = r.replace(h)
+	}
+	return res
 }

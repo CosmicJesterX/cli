@@ -112,7 +112,7 @@ func (f *finder) Find(opts FindOptions) (*api.PullRequest, ghrepo.Interface, err
 		return nil, nil, errors.New("Find error: no fields specified")
 	}
 
-	if repo, prNumber, err := f.parseURL(opts.Selector); err == nil {
+	if repo, prNumber, err := ParseURL(opts.Selector); err == nil {
 		f.prNumber = prNumber
 		f.baseRefRepo = repo
 	}
@@ -302,7 +302,9 @@ func (f *finder) Find(opts FindOptions) (*api.PullRequest, ghrepo.Interface, err
 
 var pullURLRE = regexp.MustCompile(`^/([^/]+)/([^/]+)/pull/(\d+)`)
 
-func (f *finder) parseURL(prURL string) (ghrepo.Interface, int, error) {
+// ParseURL parses a pull request URL and returns the repository and pull
+// request number.
+func ParseURL(prURL string) (ghrepo.Interface, int, error) {
 	if prURL == "" {
 		return nil, 0, fmt.Errorf("invalid URL: %q", prURL)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/MakeNowJust/heredoc"
+	fd "github.com/cli/cli/v2/internal/featuredetection"
 	"github.com/cli/cli/v2/pkg/httpmock"
 	"github.com/stretchr/testify/assert"
 )
@@ -123,6 +124,55 @@ func TestSearcherCode(t *testing.T) {
 			},
 		},
 		{
+			name: "paginates results with quoted multi-word query (#11228)",
+			query: Query{
+				Keywords: []string{"keyword with whitespace"},
+				Kind:     "code",
+				Limit:    30,
+				Qualifiers: Qualifiers{
+					Language: "go",
+				},
+			},
+			result: CodeResult{
+				IncompleteResults: false,
+				Items:             []Code{{Name: "file.go"}, {Name: "file2.go"}},
+				Total:             2,
+			},
+			httpStubs: func(reg *httpmock.Registry) {
+				firstReq := httpmock.QueryMatcher("GET", "search/code", url.Values{
+					"page":     []string{"1"},
+					"per_page": []string{"30"},
+					"q":        []string{"\"keyword with whitespace\" language:go"},
+				})
+				firstRes := httpmock.JSONResponse(map[string]interface{}{
+					"incomplete_results": false,
+					"total_count":        2,
+					"items": []interface{}{
+						map[string]interface{}{
+							"name": "file.go",
+						},
+					},
+				})
+				firstRes = httpmock.WithHeader(firstRes, "Link", `<https://api.github.com/search/code?page=2&per_page=30&q=org%3Agithub>; rel="next"`)
+				secondReq := httpmock.QueryMatcher("GET", "search/code", url.Values{
+					"page":     []string{"2"},
+					"per_page": []string{"30"},
+					"q":        []string{"\"keyword with whitespace\" language:go"},
+				})
+				secondRes := httpmock.JSONResponse(map[string]interface{}{
+					"incomplete_results": false,
+					"total_count":        2,
+					"items": []interface{}{
+						map[string]interface{}{
+							"name": "file2.go",
+						},
+					},
+				})
+				reg.Register(firstReq, firstRes)
+				reg.Register(secondReq, secondRes)
+			},
+		},
+		{
 			name: "collect full and partial pages under total number of matching search results",
 			query: Query{
 				Keywords: []string{"keyword"},
@@ -216,7 +266,7 @@ func TestSearcherCode(t *testing.T) {
 			if tt.host == "" {
 				tt.host = "github.com"
 			}
-			searcher := NewSearcher(client, tt.host)
+			searcher := NewSearcher(client, tt.host, &fd.DisabledDetectorMock{})
 			result, err := searcher.Code(tt.query)
 			if tt.wantErr {
 				assert.EqualError(t, err, tt.errMsg)
@@ -303,6 +353,62 @@ func TestSearcherCommits(t *testing.T) {
 						},
 					}),
 				)
+			},
+		},
+		{
+			name: "paginates results with quoted multi-word query (#11228)",
+			query: Query{
+				Keywords: []string{"keyword with whitespace"},
+				Kind:     "commits",
+				Limit:    30,
+				Order:    "desc",
+				Sort:     "committer-date",
+				Qualifiers: Qualifiers{
+					Author:        "foobar",
+					CommitterDate: ">2021-02-28",
+				},
+			},
+			result: CommitsResult{
+				IncompleteResults: false,
+				Items:             []Commit{{Sha: "abc"}, {Sha: "def"}},
+				Total:             2,
+			},
+			httpStubs: func(reg *httpmock.Registry) {
+				firstReq := httpmock.QueryMatcher("GET", "search/commits", url.Values{
+					"page":     []string{"1"},
+					"per_page": []string{"30"},
+					"order":    []string{"desc"},
+					"sort":     []string{"committer-date"},
+					"q":        []string{"\"keyword with whitespace\" author:foobar committer-date:>2021-02-28"},
+				})
+				firstRes := httpmock.JSONResponse(map[string]interface{}{
+					"incomplete_results": false,
+					"total_count":        2,
+					"items": []interface{}{
+						map[string]interface{}{
+							"sha": "abc",
+						},
+					},
+				})
+				firstRes = httpmock.WithHeader(firstRes, "Link", `<https://api.github.com/search/commits?page=2&per_page=30&q=org%3Agithub>; rel="next"`)
+				secondReq := httpmock.QueryMatcher("GET", "search/commits", url.Values{
+					"page":     []string{"2"},
+					"per_page": []string{"30"},
+					"order":    []string{"desc"},
+					"sort":     []string{"committer-date"},
+					"q":        []string{"\"keyword with whitespace\" author:foobar committer-date:>2021-02-28"},
+				})
+				secondRes := httpmock.JSONResponse(map[string]interface{}{
+					"incomplete_results": false,
+					"total_count":        2,
+					"items": []interface{}{
+						map[string]interface{}{
+							"sha": "def",
+						},
+					},
+				})
+				reg.Register(firstReq, firstRes)
+				reg.Register(secondReq, secondRes)
 			},
 		},
 		{
@@ -446,7 +552,7 @@ func TestSearcherCommits(t *testing.T) {
 			if tt.host == "" {
 				tt.host = "github.com"
 			}
-			searcher := NewSearcher(client, tt.host)
+			searcher := NewSearcher(client, tt.host, &fd.DisabledDetectorMock{})
 			result, err := searcher.Commits(tt.query)
 			if tt.wantErr {
 				assert.EqualError(t, err, tt.errMsg)
@@ -576,6 +682,62 @@ func TestSearcherRepositories(t *testing.T) {
 			},
 		},
 		{
+			name: "paginates results with quoted multi-word query (#11228)",
+			query: Query{
+				Keywords: []string{"keyword with whitespace"},
+				Kind:     "repositories",
+				Limit:    30,
+				Order:    "desc",
+				Sort:     "stars",
+				Qualifiers: Qualifiers{
+					Stars: ">=5",
+					Topic: []string{"topic"},
+				},
+			},
+			result: RepositoriesResult{
+				IncompleteResults: false,
+				Items:             []Repository{{Name: "test"}, {Name: "cli"}},
+				Total:             2,
+			},
+			httpStubs: func(reg *httpmock.Registry) {
+				firstReq := httpmock.QueryMatcher("GET", "search/repositories", url.Values{
+					"page":     []string{"1"},
+					"per_page": []string{"30"},
+					"order":    []string{"desc"},
+					"sort":     []string{"stars"},
+					"q":        []string{"\"keyword with whitespace\" stars:>=5 topic:topic"},
+				})
+				firstRes := httpmock.JSONResponse(map[string]interface{}{
+					"incomplete_results": false,
+					"total_count":        2,
+					"items": []interface{}{
+						map[string]interface{}{
+							"name": "test",
+						},
+					},
+				})
+				firstRes = httpmock.WithHeader(firstRes, "Link", `<https://api.github.com/search/repositories?page=2&per_page=30&q=org%3Agithub>; rel="next"`)
+				secondReq := httpmock.QueryMatcher("GET", "search/repositories", url.Values{
+					"page":     []string{"2"},
+					"per_page": []string{"30"},
+					"order":    []string{"desc"},
+					"sort":     []string{"stars"},
+					"q":        []string{"\"keyword with whitespace\" stars:>=5 topic:topic"},
+				})
+				secondRes := httpmock.JSONResponse(map[string]interface{}{
+					"incomplete_results": false,
+					"total_count":        2,
+					"items": []interface{}{
+						map[string]interface{}{
+							"name": "cli",
+						},
+					},
+				})
+				reg.Register(firstReq, firstRes)
+				reg.Register(secondReq, secondRes)
+			},
+		},
+		{
 			name: "collect full and partial pages under total number of matching search results",
 			query: Query{
 				Keywords: []string{"keyword"},
@@ -676,7 +838,7 @@ func TestSearcherRepositories(t *testing.T) {
 			if tt.host == "" {
 				tt.host = "github.com"
 			}
-			searcher := NewSearcher(client, tt.host)
+			searcher := NewSearcher(client, tt.host, &fd.DisabledDetectorMock{})
 			result, err := searcher.Repositories(tt.query)
 			if tt.wantErr {
 				assert.EqualError(t, err, tt.errMsg)
@@ -806,6 +968,62 @@ func TestSearcherIssues(t *testing.T) {
 			},
 		},
 		{
+			name: "paginates results with quoted multi-word query (#11228)",
+			query: Query{
+				Keywords: []string{"keyword with whitespace"},
+				Kind:     "issues",
+				Limit:    30,
+				Order:    "desc",
+				Sort:     "comments",
+				Qualifiers: Qualifiers{
+					Language: "go",
+					Is:       []string{"public", "locked"},
+				},
+			},
+			result: IssuesResult{
+				IncompleteResults: false,
+				Items:             []Issue{{Number: 1234}, {Number: 5678}},
+				Total:             2,
+			},
+			httpStubs: func(reg *httpmock.Registry) {
+				firstReq := httpmock.QueryMatcher("GET", "search/issues", url.Values{
+					"page":     []string{"1"},
+					"per_page": []string{"30"},
+					"order":    []string{"desc"},
+					"sort":     []string{"comments"},
+					"q":        []string{"\"keyword with whitespace\" is:locked is:public language:go"},
+				})
+				firstRes := httpmock.JSONResponse(map[string]interface{}{
+					"incomplete_results": false,
+					"total_count":        2,
+					"items": []interface{}{
+						map[string]interface{}{
+							"number": 1234,
+						},
+					},
+				})
+				firstRes = httpmock.WithHeader(firstRes, "Link", `<https://api.github.com/search/issues?page=2&per_page=30&q=org%3Agithub>; rel="next"`)
+				secondReq := httpmock.QueryMatcher("GET", "search/issues", url.Values{
+					"page":     []string{"2"},
+					"per_page": []string{"30"},
+					"order":    []string{"desc"},
+					"sort":     []string{"comments"},
+					"q":        []string{"\"keyword with whitespace\" is:locked is:public language:go"},
+				})
+				secondRes := httpmock.JSONResponse(map[string]interface{}{
+					"incomplete_results": false,
+					"total_count":        2,
+					"items": []interface{}{
+						map[string]interface{}{
+							"number": 5678,
+						},
+					},
+				})
+				reg.Register(firstReq, firstRes)
+				reg.Register(secondReq, secondRes)
+			},
+		},
+		{
 			name: "collect full and partial pages under total number of matching search results",
 			query: Query{
 				Keywords: []string{"keyword"},
@@ -906,7 +1124,7 @@ func TestSearcherIssues(t *testing.T) {
 			if tt.host == "" {
 				tt.host = "github.com"
 			}
-			searcher := NewSearcher(client, tt.host)
+			searcher := NewSearcher(client, tt.host, fd.AdvancedIssueSearchUnsupported())
 			result, err := searcher.Issues(tt.query)
 			if tt.wantErr {
 				assert.EqualError(t, err, tt.errMsg)
@@ -914,6 +1132,88 @@ func TestSearcherIssues(t *testing.T) {
 			}
 			assert.NoError(t, err)
 			assert.Equal(t, tt.result, result)
+		})
+	}
+}
+
+func TestSearcherIssuesAdvancedSyntax(t *testing.T) {
+	query := Query{
+		Kind:     KindIssues,
+		Limit:    1,
+		Keywords: []string{"keyword"},
+		Qualifiers: Qualifiers{
+			// Ordinary qualifiers
+			Author: "johndoe",
+			Label:  []string{"foo", "bar"},
+			// Special qualifiers (that should be grouped and OR-ed when using advanced issue search)
+			Repo: []string{"foo/bar", "foo/baz"},
+			Is:   []string{"private", "public"},
+			User: []string{"johndoe", "janedoe"},
+			In:   []string{"title", "body", "comments"},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		query      Query
+		detector   fd.Detector
+		wantValues url.Values
+		wantErr    string
+	}{
+		{
+			// TODO advancedIssueSearchCleanup
+			// Remove this test case once GHES 3.17 support ends.
+			name:     "advanced issue search not supported",
+			detector: fd.AdvancedIssueSearchUnsupported(),
+			query:    query,
+			wantValues: url.Values{
+				"q":               []string{"keyword author:johndoe in:body in:comments in:title is:private is:public label:bar label:foo repo:foo/bar repo:foo/baz user:janedoe user:johndoe"},
+				"advanced_search": nil, // assert absence
+			},
+		},
+		{
+			// TODO advancedIssueSearchCleanup
+			// Remove this test case once GHES 3.17 support ends.
+			name:     "advanced issue search supported as an opt-in feature",
+			detector: fd.AdvancedIssueSearchSupportedAsOptIn(),
+			query:    query,
+			wantValues: url.Values{
+				"q":               []string{"keyword author:johndoe (in:body OR in:comments OR in:title) (is:private OR is:public) label:bar label:foo (repo:foo/bar OR repo:foo/baz) (user:janedoe OR user:johndoe)"},
+				"advanced_search": []string{"true"}, // opt-in
+			},
+		},
+		{
+			// TODO advancedIssueSearchCleanup
+			// No need for feature detection once GHES 3.17 support ends.
+			name:     "advanced issue search supported as the only search backend",
+			detector: fd.AdvancedIssueSearchSupportedAsOnlyBackend(),
+			query:    query,
+			wantValues: url.Values{
+				"q":               []string{"keyword author:johndoe (in:body OR in:comments OR in:title) (is:private OR is:public) label:bar label:foo (repo:foo/bar OR repo:foo/baz) (user:janedoe OR user:johndoe)"},
+				"advanced_search": nil, // assert absence
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := &httpmock.Registry{}
+			defer reg.Verify(t)
+
+			reg.Register(
+				httpmock.QueryMatcher("GET", "search/issues", tt.wantValues),
+				httpmock.JSONResponse(IssuesResult{}),
+			)
+
+			client := &http.Client{Transport: reg}
+			searcher := NewSearcher(client, "github.com", tt.detector)
+
+			_, err := searcher.Issues(tt.query)
+			if tt.wantErr != "" {
+				assert.EqualError(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }
@@ -948,13 +1248,21 @@ func TestSearcherURL(t *testing.T) {
 			query: query,
 			url:   "https://enterprise.com/search?order=desc&q=keyword+stars%3A%3E%3D5+topic%3Atopic&sort=stars&type=repositories",
 		},
+		{
+			name: "outputs encoded query url with quoted multi-word keywords",
+			query: Query{
+				Keywords: []string{"keyword with whitespace"},
+				Kind:     "repositories",
+			},
+			url: "https://github.com/search?q=%22keyword+with+whitespace%22&type=repositories",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.host == "" {
 				tt.host = "github.com"
 			}
-			searcher := NewSearcher(nil, tt.host)
+			searcher := NewSearcher(nil, tt.host, nil)
 			assert.Equal(t, tt.url, searcher.URL(tt.query))
 		})
 	}

@@ -201,6 +201,8 @@ func NewCmdCreate(f *cmdutil.Factory, runF func(*CreateOptions) error) *cobra.Co
 		Long: heredoc.Docf(`
 			Create a pull request on GitHub.
 
+			Upon success, the URL of the created pull request will be printed.
+
 			When the current branch isn't fully pushed to a git remote, a prompt will ask where
 			to push the branch and offer an option to fork the base repository. Use %[1]s--head%[1]s to
 			explicitly skip any forking or pushing behavior.

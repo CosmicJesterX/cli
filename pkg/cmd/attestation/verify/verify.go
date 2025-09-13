@@ -186,9 +186,10 @@ func NewVerifyCmd(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command 
 			opts.APIClient = api.NewLiveClient(hc, opts.Hostname, opts.Logger)
 
 			config := verification.SigstoreConfig{
-				TrustedRoot:  opts.TrustedRoot,
+				HttpClient:   hc,
 				Logger:       opts.Logger,
 				NoPublicGood: opts.NoPublicGood,
+				TrustedRoot:  opts.TrustedRoot,
 			}
 
 			// Prepare for tenancy if detected
